@@ -1,70 +1,37 @@
 import cv2
 import numpy as np
-from skimage.filters import threshold_local
-import imutils
+from .advanced_preprocessor import AdvancedPreprocessor
 
 class ImagePreprocessor:
-    @staticmethod
-    def denoise_image(image):
-        """
-        Remove noise from the image using Non-local Means Denoising
-        """
-        return cv2.fastNlMeansDenoisingColored(image, None, 10, 10, 7, 21)
+    def __init__(self, debug_mode: bool = False):
+        self.advanced_preprocessor = AdvancedPreprocessor()
+        self.advanced_preprocessor.set_debug_mode(debug_mode)
+        self.debug_mode = debug_mode
 
-    @staticmethod
-    def binarize(image):
+    def process_image(self, image: np.ndarray) -> np.ndarray:
         """
-        Convert image to binary using adaptive thresholding
+        Process image using advanced preprocessing techniques
         """
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        T = threshold_local(gray, 11, offset=10, method="gaussian")
-        return (gray > T).astype("uint8") * 255
+        # Apply advanced preprocessing
+        processed_image = self.advanced_preprocessor.enhance_image(image)
+        
+        return processed_image
 
-    @staticmethod
-    def deskew(image):
+    def detect_table_regions(self, image: np.ndarray) -> list:
         """
-        Correct skew in the image
+        Detect table regions in the image
         """
-        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-        edges = cv2.Canny(gray, 50, 150, apertureSize=3)
-        lines = cv2.HoughLines(edges, 1, np.pi/180, 100)
-        
-        if lines is not None:
-            angle = 0
-            for rho, theta in lines[0]:
-                angle = np.degrees(theta) - 90
-            
-            if abs(angle) > 0.5:
-                (h, w) = image.shape[:2]
-                center = (w // 2, h // 2)
-                M = cv2.getRotationMatrix2D(center, angle, 1.0)
-                image = cv2.warpAffine(image, M, (w, h),
-                                     flags=cv2.INTER_CUBIC,
-                                     borderMode=cv2.BORDER_REPLICATE)
-        return image
+        return self.advanced_preprocessor.detect_table_regions(image)
 
-    @staticmethod
-    def enhance_resolution(image):
+    def get_debug_images(self) -> dict:
         """
-        Enhance image resolution using super resolution
+        Get intermediate processing results if debug mode is enabled
         """
-        return cv2.resize(image, None, fx=2, fy=2, interpolation=cv2.INTER_CUBIC)
+        return self.advanced_preprocessor.get_debug_images()
 
-    @staticmethod
-    def process_image(image):
+    def set_debug_mode(self, enabled: bool):
         """
-        Apply all preprocessing steps
+        Enable/disable debug mode
         """
-        # Enhance resolution
-        image = ImagePreprocessor.enhance_resolution(image)
-        
-        # Denoise
-        image = ImagePreprocessor.denoise_image(image)
-        
-        # Deskew
-        image = ImagePreprocessor.deskew(image)
-        
-        # Binarize
-        image = ImagePreprocessor.binarize(image)
-        
-        return image 
+        self.debug_mode = enabled
+        self.advanced_preprocessor.set_debug_mode(enabled) 
