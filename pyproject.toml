@@ -4,4 +4,12 @@ version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
 requires-python = ">=3.13"
-dependencies = []
+dependencies = [
+    "imutils>=0.5.4",
+    "opencv-python>=4.11.0.86",
+    "openpyxl>=3.1.5",
+    "pandas>=2.2.3",
+    "pdf2image>=1.17.0",
+    "pytesseract>=0.3.13",
+    "scikit-image>=0.25.2",
+]
