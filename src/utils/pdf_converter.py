@@ -1,26 +1,68 @@
-from pdf2image import convert_from_path
+import pdfplumber
+import numpy as np
+from PIL import Image
+from typing import List, Optional
+import io
 import os
 
 class PDFConverter:
-    @staticmethod
-    def pdf_to_images(pdf_path, dpi=300):
+    def __init__(self, dpi: int = 300):
+        self.dpi = dpi
+
+    def pdf_to_images(self, pdf_path: str) -> List[Image.Image]:
         """
-        Convert PDF to list of images
+        Convert PDF to list of PIL Images using pdfplumber
         
         Args:
-            pdf_path (str): Path to the PDF file
-            dpi (int): DPI for the output images
+            pdf_path: Path to PDF file
             
         Returns:
-            list: List of PIL Image objects
+            List of PIL Image objects
+        """
+        images = []
+        
+        try:
+            # Open PDF document
+            with pdfplumber.open(pdf_path) as pdf:
+                # Convert each page to image
+                for page in pdf.pages:
+                    # Get page as image
+                    img = page.to_image(resolution=self.dpi)
+                    # Convert to PIL Image
+                    pil_image = img.original
+                    images.append(pil_image)
+            
+            return images
+            
+        except Exception as e:
+            raise RuntimeError(f"Error converting PDF to images: {str(e)}")
+
+    def enhance_image_quality(self, image: Image.Image) -> Image.Image:
+        """
+        Enhance image quality if needed
+        """
+        # Convert to RGB if not already
+        if image.mode != 'RGB':
+            image = image.convert('RGB')
+        
+        # Optionally enhance resolution for better OCR
+        if self.dpi < 300:  # If input DPI is low
+            width, height = image.size
+            new_width = int(width * (300 / self.dpi))
+            new_height = int(height * (300 / self.dpi))
+            image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
+        
+        return image
+
+    def save_debug_image(self, image: Image.Image, output_path: str):
+        """
+        Save image for debugging purposes
         """
         try:
-            # Convert PDF to images
-            images = convert_from_path(pdf_path, dpi=dpi)
-            return images
-        except Exception as e:
-            print(f"Error converting PDF {pdf_path}: {str(e)}")
-            return []
+            image.save(output_path, 'PNG')
+            return True
+        except Exception:
+            return False
 
     @staticmethod
     def save_images(images, output_dir, base_filename):
