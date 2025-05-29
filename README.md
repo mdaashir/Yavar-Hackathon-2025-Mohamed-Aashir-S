@@ -1,6 +1,6 @@
-# Invoice Data Extraction System
+# Invoice Data Extraction & Verification System
 
-A robust system for extracting and validating data from invoice PDFs using advanced OCR and computer vision techniques.
+This project implements an automated system for extracting and verifying data from scanned invoice PDFs using open-source OCR models. The system processes image-based invoices to extract structured information and performs comprehensive validation checks.
 
 ## Features
 
@@ -25,65 +25,6 @@ A robust system for extracting and validating data from invoice PDFs using advan
 - Python 3.8+
 - CUDA-compatible GPU (optional, for faster processing)
 - Required Python packages (see requirements.txt)
-
-## Installation
-
-1. Clone the repository:
-```bash
-git clone https://github.com/mdaashir/Yavar-Hackathon-2025-Mohamed-Aashir-S.git
-cd Yavar-Hackathon-2025-Mohamed-Aashir-S
-```
-
-2. Create and activate a virtual environment:
-```bash
-# Windows
-python -m venv .venv
-.venv\Scripts\activate
-
-# Linux/Mac
-python3 -m venv .venv
-source .venv/bin/activate
-```
-
-3. Install dependencies:
-```bash
-pip install -r requirements.txt
-```
-
-## Usage
-
-1. Place your invoice PDFs in the `input` directory.
-
-2. Run the processor:
-```bash
-python src/main.py
-```
-
-3. Check the `output` directory for results:
-- `*_data.json`: Extracted data in JSON format
-- `*_data.xlsx`: Formatted data in Excel
-- `*_verification.json`: Data verification results
-- `seals_and_signatures/`: Detected seals and signatures
-- `error_report.txt`: Processing error details (if any)
-
-## Directory Structure
-
-```
-├── src/
-│   └──input/                      # Input PDF files
-│   └──output/                     # Generated output files
-│       └── seals_and_signatures/  # Extracted seals and signatures
-│   ├── logs/                      # Log files generated
-│   ├── models/                    # Models used
-│   ├── extraction/                # Data extraction modules
-│   ├── preprocessing/             # Image preprocessing
-│   ├── verification/              # Data verification
-│   └── utils/                     # Utility functions
-├── requirements.txt               # Python dependencies
-├── setup.py                       # Setup file
-└── README.md                      # This file
-```
-
 ## Configuration
 
 The system can be configured through various parameters:
@@ -114,36 +55,145 @@ The system provides comprehensive error handling:
 - Output generation errors
 
 All errors are logged and compiled in an error report.
+## Project Structure
 
-## Output Formats
+```
+├── src/
+│   └──input/                      # Input PDF files
+│   └──output/                     # Generated output files
+│       └── seals_and_signatures/  # Extracted seals and signatures
+│   ├── logs/                      # Log files generated
+│   ├── models/                    # Models used
+│   ├── extraction/                # Data extraction modules
+│   ├── preprocessing/             # Image preprocessing
+│   ├── verification/              # Data verification
+│   └── utils/                     # Utility functions
+├── requirements.txt               # Python dependencies
+├── setup.py                       # Setup file
+└── README.md                      # This file
+```
 
-1. **JSON Output** (`*_data.json`):
+## Installation
+
+1. Clone the repository:
+```bash
+git clone https://github.com/mdaashir/Yavar-Hackathon-2025-Mohamed-Aashir-S.git
+cd Yavar-Hackathon-2025-Mohamed-Aashir-S
+```
+
+2. Create a virtual environment:
+```bash
+python -m venv venv
+source venv/bin/activate  # Linux/Mac
+venv\Scripts\activate     # Windows
+```
+
+3. Install dependencies:
+```bash
+pip install -r requirements.txt
+```
+
+## Usage
+
+1. Place input invoice PDFs in the `src/input/` directory.
+
+2. Run the processor:
+```bash
+python src/main.py
+```
+
+3. Check the `src/output/` directory for results:
+- `{invoice_name}_data.json`: Extracted data in JSON format
+- `{invoice_name}_data.xlsx`: Data in Excel format
+- `{invoice_name}_verification.json`: Verification report
+- `seals_and_signatures/`: Directory containing extracted seals/signatures
+
+## Technical Approach
+
+### 1. Image Preprocessing
+- Denoising using bilateral filtering
+- Contrast enhancement with CLAHE
+- Adaptive thresholding
+- Morphological operations for noise removal
+
+### 2. OCR and Data Extraction
+- EasyOCR for text recognition
+- Custom table detection using contour analysis
+- Cell structure analysis for table data
+- Pattern matching for field extraction
+
+### 3. Data Verification
+- Confidence scoring for each extracted field
+- Line item calculations validation
+- Total amount verification
+- GST number format validation
+- Date format verification
+
+## Dependencies
+
+- OpenCV for image processing
+- EasyOCR for text recognition
+- PyTesseract for supplementary OCR
+- Pandas for data handling
+- PyPDF2 for PDF processing
+- NumPy for numerical operations
+
+## Output Format
+
+### JSON Data Structure
 ```json
 {
-    "invoice_number": {"value": "INV001", "confidence": 0.95},
-    "invoice_date": {"value": "2025-05-29", "confidence": 0.92},
-    "supplier_gst_number": {"value": "29ABCDE1234F1Z5", "confidence": 0.88},
-    ...
-    "table_data": [
-        {"item": "Product1", "quantity": 10, "price": 100.00},
-        ...
-    ]
+  "invoice_number": {"value": "INV001", "confidence": 0.95},
+  "invoice_date": {"value": "2025-05-01", "confidence": 0.92},
+  "supplier_gst_number": {"value": "29ABCDE1234F1Z5", "confidence": 0.89},
+  "bill_to_gst_number": {"value": "29PQRST5678G1Z3", "confidence": 0.88},
+  "po_number": {"value": "PO123", "confidence": 0.87},
+  "shipping_address": {"value": "123 Business St, City", "confidence": 0.91},
+  "seal_and_sign_present": {"value": true, "confidence": 0.85},
+  "table_data": [
+    {
+      "description": "Item 1",
+      "hsn_sac": "998391",
+      "quantity": 2,
+      "unit_price": 100.00,
+      "total_amount": 200.00,
+      "serial_number": "1"
+    }
+  ]
 }
 ```
 
-2. **Excel Output** (`*_data.xlsx`):
-- Sheet 1: General Information
-- Sheet 2: Line Items
-
-3. **Verification Report** (`*_verification.json`):
+### Verification Report Structure
 ```json
 {
-    "status": "valid",
-    "checks": [
-        {"field": "invoice_number", "status": "valid"},
-        {"field": "gst_number", "status": "valid"},
-        ...
-    ]
+  "field_verification": {
+    "invoice_number": {"confidence": 0.95, "present": true},
+    ...
+  },
+  "line_items_verification": [
+    {
+      "row": 1,
+      "description_confidence": 0.93,
+      "line_total_check": {
+        "calculated_value": 200.00,
+        "extracted_value": 200.00,
+        "check_passed": true
+      }
+    }
+  ],
+  "total_calculations_verification": {
+    "subtotal_check": {
+      "calculated_value": 200.00,
+      "extracted_value": 200.00,
+      "check_passed": true
+    }
+  },
+  "summary": {
+    "all_fields_confident": true,
+    "all_line_items_verified": true,
+    "totals_verified": true,
+    "issues": []
+  }
 }
 ```
 

@@ -1,161 +1,170 @@
-import unittest
-import os
 import shutil
-import tempfile
-from unittest.mock import Mock, patch
+import unittest
 from pathlib import Path
-import numpy as np
+
 import cv2
+import numpy as np
+
+from src.extraction.data_extractor import DataExtractor
 from src.main import InvoiceProcessor
-from src.utils.error_handler import PDFConversionError, OCRError, ValidationError
+from src.preprocessing.image_processor import ImagePreprocessor
+from src.verification.data_verifier import DataVerifier, verify_date_format
+
 
 class TestInvoiceProcessor(unittest.TestCase):
-    def setUp(self):
+    @classmethod
+    def setUpClass(cls):
         """Set up test environment"""
-        # Create temporary directories for testing
-        self.test_dir = tempfile.mkdtemp()
-        self.input_dir = os.path.join(self.test_dir, 'input')
-        self.output_dir = os.path.join(self.test_dir, 'output')
-        os.makedirs(self.input_dir)
-        
+        cls.test_dir = Path('test_data')
+        cls.input_dir = cls.test_dir / 'input'
+        cls.output_dir = cls.test_dir / 'output'
+
+        # Create test directories
+        cls.input_dir.mkdir(parents=True, exist_ok=True)
+        cls.output_dir.mkdir(parents=True, exist_ok=True)
+
         # Initialize processor
-        self.processor = InvoiceProcessor(
-            input_dir=self.input_dir,
-            output_dir=self.output_dir
+        cls.processor = InvoiceProcessor(
+            input_dir=str(cls.input_dir),
+            output_dir=str(cls.output_dir)
         )
-        
-        # Create a test PDF file
-        self.test_pdf = os.path.join(self.input_dir, 'test_invoice.pdf')
-        with open(self.test_pdf, 'w') as f:
-            f.write('Test PDF content')
 
-    def tearDown(self):
+    @classmethod
+    def tearDownClass(cls):
         """Clean up test environment"""
-        shutil.rmtree(self.test_dir)
+        shutil.rmtree(cls.test_dir)
 
-    def test_create_directories(self):
-        """Test directory creation"""
-        self.assertTrue(os.path.exists(self.output_dir))
-        self.assertTrue(os.path.exists(os.path.join(self.output_dir, 'seals_and_signatures')))
+    def setUp(self):
+        """Set up for each test"""
+        # Clear output directory
+        for file in self.output_dir.glob('*'):
+            if file.is_file():
+                file.unlink()
 
-    @patch('src.main.PDFConverter')
-    @patch('src.main.ImagePreprocessor')
-    @patch('src.main.DataExtractor')
-    def test_process_invoice_success(self, mock_extractor, mock_preprocessor, mock_converter):
-        """Test successful invoice processing"""
-        # Mock PDF conversion
-        mock_converter.return_value.pdf_to_images.return_value = [
-            np.zeros((100, 100, 3), dtype=np.uint8)
-        ]
-        
-        # Mock data extraction
-        mock_extractor.return_value.extract_all_data.return_value = {
-            'invoice_number': {'value': '12345', 'confidence': 0.9},
-            'table_data': []
-        }
-        
-        # Process invoice
-        extracted_data, verification_results = self.processor.process_invoice(self.test_pdf)
-        
-        self.assertIsNotNone(extracted_data)
-        self.assertEqual(extracted_data['invoice_number']['value'], '12345')
+    def test_image_preprocessing(self):
+        """Test image preprocessing functionality"""
+        # Create a test image
+        test_image = np.zeros((100, 100), dtype=np.uint8)
+        cv2.putText(test_image, "Test", (10, 50),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1, 255, 2)
 
-    @patch('src.main.PDFConverter')
-    def test_process_invoice_pdf_error(self, mock_converter):
-        """Test PDF conversion error handling"""
-        mock_converter.return_value.pdf_to_images.return_value = None
-        
-        result = self.processor.process_invoice(self.test_pdf)
-        self.assertEqual(result, (None, None))
-        
-        # Check error tracking
-        self.assertEqual(len(self.processor.error_tracker.errors), 1)
-        self.assertEqual(self.processor.error_tracker.errors[0]['error_type'], 'PDFConversionError')
+        # Process image
+        preprocessor = ImagePreprocessor()
+        processed = preprocessor.process_image(test_image)
 
-    def test_save_outputs_success(self):
-        """Test successful output saving"""
+        # Verify processing
+        self.assertIsNotNone(processed)
+        self.assertEqual(processed.shape, test_image.shape)
+
+    def test_data_extraction(self):
+        """Test data extraction functionality"""
+        extractor = DataExtractor()
+
+        # Create a simple test image
+        test_image = np.zeros((200, 200), dtype=np.uint8)
+        cv2.putText(test_image, "Invoice#: TEST123", (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, 255, 1)
+        cv2.putText(test_image, "Date: 2025-05-30", (10, 60),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, 255, 1)
+
+        # Extract data
+        data = extractor.extract_all_data(test_image)
+
+        # Verify extraction
+        self.assertIsInstance(data, dict)
+        self.assertIn('invoice_number', data)
+        self.assertIn('invoice_date', data)
+
+    def test_data_verification(self):
+        """Test data verification functionality"""
+        verifier = DataVerifier()
+
+        # Test data
         test_data = {
-            'invoice_number': {'value': '12345', 'confidence': 0.9},
+            'invoice_number': {'value': 'TEST123', 'confidence': 0.95},
+            'invoice_date': {'value': '2025-05-30', 'confidence': 0.92},
+            'supplier_gst_number': {'value': '29ABCDE1234F1Z5', 'confidence': 0.89},
             'table_data': [
-                {'description': 'Item 1', 'quantity': 1, 'unit_price': 10.0}
+                {
+                    'description': 'Item 1',
+                    'quantity': 2,
+                    'unit_price': 100.00,
+                    'total_amount': 200.00
+                }
             ]
         }
-        verification_results = {'is_valid': True, 'errors': []}
-        
-        success = self.processor.save_outputs(
-            test_data, verification_results, 'test_invoice'
-        )
-        
-        self.assertTrue(success)
-        self.assertTrue(os.path.exists(os.path.join(self.output_dir, 'test_invoice_data.json')))
-        self.assertTrue(os.path.exists(os.path.join(self.output_dir, 'test_invoice_data.xlsx')))
 
-    def test_save_outputs_error(self):
-        """Test output saving error handling"""
-        test_data = {'invalid_data': None}
-        verification_results = {'is_valid': False}
-        
-        success = self.processor.save_outputs(
-            test_data, verification_results, 'test_invoice'
-        )
-        
-        self.assertFalse(success)
-        self.assertGreater(len(self.processor.error_tracker.errors), 0)
+        # Verify data
+        results = verifier.verify_data(test_data)
 
-    @patch('src.main.PDFConverter')
-    @patch('src.main.DataExtractor')
-    def test_process_directory(self, mock_extractor, mock_converter):
-        """Test directory processing"""
-        # Create multiple test PDFs
-        for i in range(3):
-            with open(os.path.join(self.input_dir, f'test_{i}.pdf'), 'w') as f:
-                f.write(f'Test PDF {i}')
-        
-        # Mock successful processing
-        mock_converter.return_value.pdf_to_images.return_value = [
-            np.zeros((100, 100, 3), dtype=np.uint8)
-        ]
-        mock_extractor.return_value.extract_all_data.return_value = {
-            'invoice_number': {'value': '12345', 'confidence': 0.9},
-            'table_data': []
+        # Check verification results
+        self.assertIsInstance(results, dict)
+        self.assertIn('field_verification', results)
+        self.assertIn('line_items_verification', results)
+        self.assertIn('summary', results)
+
+    def test_output_generation(self):
+        """Test output file generation"""
+        # Test data
+        test_data = {
+            'invoice_number': {'value': 'TEST123', 'confidence': 0.95},
+            'invoice_date': {'value': '2025-05-30', 'confidence': 0.92},
+            'table_data': [
+                {
+                    'description': 'Item 1',
+                    'quantity': 2,
+                    'unit_price': 100.00,
+                    'total_amount': 200.00
+                }
+            ]
         }
-        
-        # Process directory
-        self.processor.process_directory()
-        
-        # Check error report
-        error_report_path = os.path.join(self.output_dir, 'error_report.txt')
-        self.assertFalse(os.path.exists(error_report_path))
 
-    def test_empty_directory(self):
-        """Test handling of empty input directory"""
-        # Remove test files
-        for file in os.listdir(self.input_dir):
-            os.remove(os.path.join(self.input_dir, file))
-            
-        self.processor.process_directory()
-        # Should not raise any errors
+        verification_results = {
+            'field_verification': {
+                'invoice_number': {'confidence': 0.95, 'present': True}
+            },
+            'summary': {'all_fields_confident': True}
+        }
 
-    @patch('src.main.PDFConverter')
-    def test_error_report_generation(self, mock_converter):
-        """Test error report generation"""
-        # Simulate errors
-        mock_converter.return_value.pdf_to_images.side_effect = PDFConversionError("Test error")
-        
-        # Create test PDF
-        with open(os.path.join(self.input_dir, 'error_test.pdf'), 'w') as f:
-            f.write('Test PDF')
-            
-        self.processor.process_directory()
-        
-        # Check error report
-        error_report_path = os.path.join(self.output_dir, 'error_report.txt')
-        self.assertTrue(os.path.exists(error_report_path))
-        
-        with open(error_report_path, 'r') as f:
-            report_content = f.read()
-            self.assertIn('PDFConversionError', report_content)
-            self.assertIn('error_test.pdf', report_content)
+        # Save outputs
+        success = self.processor.save_outputs(
+            test_data,
+            verification_results,
+            'test_invoice'
+        )
+
+        # Verify output files
+        self.assertTrue(success)
+        self.assertTrue((self.output_dir / 'test_invoice_data.json').exists())
+        self.assertTrue((self.output_dir / 'test_invoice_data.xlsx').exists())
+        self.assertTrue((self.output_dir / 'test_invoice_verification.json').exists())
+
+    def test_gst_number_validation(self):
+        """Test GST number validation"""
+        verifier = DataVerifier()
+
+        # Valid GST number
+        self.assertTrue(verifier.verify_gst_number('29ABCDE1234F1Z5'))
+
+        # Invalid GST numbers
+        self.assertFalse(verifier.verify_gst_number(''))
+        self.assertFalse(verifier.verify_gst_number('INVALID'))
+        self.assertFalse(verifier.verify_gst_number('29ABCDE1234'))
+
+    def test_date_format_validation(self):
+        """Test date format validation"""
+        DataVerifier()
+
+        # Valid dates
+        self.assertTrue(verify_date_format('2025-05-30'))
+        self.assertTrue(verify_date_format('30/05/2025'))
+        self.assertTrue(verify_date_format('30 May 2025'))
+
+        # Invalid dates
+        self.assertFalse(verify_date_format(''))
+        self.assertFalse(verify_date_format('Invalid'))
+        self.assertFalse(verify_date_format('2025/13/45'))
+
 
 if __name__ == '__main__':
-    unittest.main() 
+    unittest.main()

@@ -1,8 +1,12 @@
 import unittest
-import numpy as np
+from unittest.mock import patch
+
 import cv2
-from unittest.mock import Mock, patch
-from src.extraction.data_extractor import DataExtractor
+import numpy as np
+
+from src.extraction.data_extractor import DataExtractor, extract_invoice_number, extract_gst_numbers, \
+    _validate_gst_number, extract_date, extract_po_number, extract_shipping_address
+
 
 class TestDataExtractor(unittest.TestCase):
     def setUp(self):
@@ -10,22 +14,22 @@ class TestDataExtractor(unittest.TestCase):
         self.extractor = DataExtractor()
         # Create a simple test image
         self.test_image = np.zeros((100, 100, 3), dtype=np.uint8)
-        cv2.putText(self.test_image, "Invoice #12345", (10, 30), 
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        cv2.putText(self.test_image, "Invoice #12345", (10, 30),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
         cv2.putText(self.test_image, "GST: 29ABCDE1234F1Z5", (10, 50),
-                   cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
     def test_extract_invoice_number(self):
         """Test invoice number extraction"""
         text = "Invoice #12345\nDate: 2024-03-15"
-        invoice_number, confidence = self.extractor.extract_invoice_number(text)
+        invoice_number, confidence = extract_invoice_number(text)
         self.assertEqual(invoice_number, "12345")
         self.assertGreater(confidence, 0.8)
 
     def test_extract_gst_numbers(self):
         """Test GST number extraction"""
         text = "Supplier GST: 29ABCDE1234F1Z5\nCustomer GST: 27PQRST5678G1Z3"
-        gst_numbers = self.extractor.extract_gst_numbers(text)
+        gst_numbers = extract_gst_numbers(text)
         self.assertIsNotNone(gst_numbers)
         self.assertEqual(len(gst_numbers), 2)
         self.assertEqual(gst_numbers[0][0], "29ABCDE1234F1Z5")
@@ -35,8 +39,8 @@ class TestDataExtractor(unittest.TestCase):
         """Test GST number validation"""
         valid_gst = "29ABCDE1234F1Z5"
         invalid_gst = "123456"
-        self.assertTrue(self.extractor._validate_gst_number(valid_gst))
-        self.assertFalse(self.extractor._validate_gst_number(invalid_gst))
+        self.assertTrue(_validate_gst_number(valid_gst))
+        self.assertFalse(_validate_gst_number(invalid_gst))
 
     def test_extract_date(self):
         """Test date extraction with various formats"""
@@ -46,7 +50,7 @@ class TestDataExtractor(unittest.TestCase):
             ("Bill Date: 15 Mar 2024", "15 Mar 2024"),
         ]
         for text, expected_date in test_cases:
-            date, confidence = self.extractor.extract_date(text)
+            date, confidence = extract_date(text)
             self.assertEqual(date, expected_date)
             self.assertGreater(confidence, 0.8)
 
@@ -66,22 +70,23 @@ class TestDataExtractor(unittest.TestCase):
             ("Order Number: PO-2024-001", "PO-2024-001"),
         ]
         for text, expected_po in test_cases:
-            po_number, confidence = self.extractor.extract_po_number(text)
+            po_number, confidence = extract_po_number(text)
             self.assertEqual(po_number, expected_po)
             self.assertGreater(confidence, 0.8)
 
     def test_extract_shipping_address(self):
         """Test shipping address extraction"""
         text = "Ship To: 123 Test Street\nCity, State 12345"
-        address, confidence = self.extractor.extract_shipping_address(text)
+        address, confidence = extract_shipping_address(text)
         self.assertEqual(address, "123 Test Street\nCity, State 12345")
         self.assertGreater(confidence, 0.7)
 
     def test_handle_empty_input(self):
         """Test handling of empty input"""
-        self.assertIsNone(self.extractor.extract_gst_numbers(""))
-        self.assertEqual(self.extractor.extract_invoice_number(""), (None, 0.0))
-        self.assertEqual(self.extractor.extract_date(""), (None, 0.0))
+        self.assertIsNone(extract_gst_numbers(""))
+        self.assertEqual(extract_invoice_number(""), (None, 0.0))
+        self.assertEqual(extract_date(""), (None, 0.0))
+
 
 if __name__ == '__main__':
-    unittest.main() 
+    unittest.main()

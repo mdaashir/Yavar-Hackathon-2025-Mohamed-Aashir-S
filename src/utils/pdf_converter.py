@@ -1,9 +1,20 @@
-import pdfplumber
-import numpy as np
-from PIL import Image
-from typing import List, Optional
-import io
 import os
+from typing import List
+
+import pdfplumber
+from PIL import Image
+
+
+def save_debug_image(image: Image.Image, output_path: str):
+    """
+    Save image for debugging purposes
+    """
+    try:
+        image.save(output_path, 'PNG')
+        return True
+    except Exception:
+        return False
+
 
 class PDFConverter:
     def __init__(self, dpi: int = 300):
@@ -20,7 +31,7 @@ class PDFConverter:
             List of PIL Image objects
         """
         images = []
-        
+
         try:
             # Open PDF document
             with pdfplumber.open(pdf_path) as pdf:
@@ -31,9 +42,9 @@ class PDFConverter:
                     # Convert to PIL Image
                     pil_image = img.original
                     images.append(pil_image)
-            
+
             return images
-            
+
         except Exception as e:
             raise RuntimeError(f"Error converting PDF to images: {str(e)}")
 
@@ -44,25 +55,15 @@ class PDFConverter:
         # Convert to RGB if not already
         if image.mode != 'RGB':
             image = image.convert('RGB')
-        
+
         # Optionally enhance resolution for better OCR
         if self.dpi < 300:  # If input DPI is low
             width, height = image.size
             new_width = int(width * (300 / self.dpi))
             new_height = int(height * (300 / self.dpi))
             image = image.resize((new_width, new_height), Image.Resampling.LANCZOS)
-        
-        return image
 
-    def save_debug_image(self, image: Image.Image, output_path: str):
-        """
-        Save image for debugging purposes
-        """
-        try:
-            image.save(output_path, 'PNG')
-            return True
-        except Exception:
-            return False
+        return image
 
     @staticmethod
     def save_images(images, output_dir, base_filename):
@@ -79,11 +80,11 @@ class PDFConverter:
         """
         if not os.path.exists(output_dir):
             os.makedirs(output_dir)
-            
+
         image_paths = []
         for i, image in enumerate(images):
-            output_path = os.path.join(output_dir, f"{base_filename}_page_{i+1}.png")
+            output_path = os.path.join(output_dir, f"{base_filename}_page_{i + 1}.png")
             image.save(output_path, "PNG")
             image_paths.append(output_path)
-            
-        return image_paths 
+
+        return image_paths

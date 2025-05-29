@@ -1,18 +1,74 @@
+import logging
+from typing import List, Dict, Any, Tuple
+
+import cv2
 import easyocr
 import numpy as np
-from PIL import Image
-from typing import List, Dict, Any, Tuple
-import cv2
-from skimage import exposure, filters, morphology
 import torch
-import logging
+from numpy import ndarray
+from torch import Tensor
+
+
+def _get_device() -> torch.device:
+    """
+    Determine the best available device for computation
+    """
+    if torch.cuda.is_available():
+        # Get the GPU with the most free memory
+        device_id = 0
+        if torch.cuda.device_count() > 1:
+            free_memory = []
+            for i in range(torch.cuda.device_count()):
+                torch.cuda.set_device(i)
+                torch.cuda.empty_cache()
+                free_memory.append(torch.cuda.memory_reserved(i))
+            device_id = free_memory.index(min(free_memory))
+
+        device = torch.device(f'cuda:{device_id}')
+
+        # Log GPU information
+        logging.info(f"Using GPU: {torch.cuda.get_device_name(device_id)}")
+        logging.info(f"GPU Memory: {torch.cuda.get_device_properties(device_id).total_memory / 1024 ** 3:.2f} GB")
+
+        # Optimize CUDA settings
+        torch.cuda.set_device(device_id)
+        torch.backends.cudnn.fastest = True
+        torch.backends.cudnn.benchmark = True
+
+        return device
+    elif torch.backends.mps.is_available():
+        logging.info("Using Apple M1/M2 GPU acceleration")
+        return torch.device('mps')
+    else:
+        logging.info("No GPU available, using CPU")
+        return torch.device('cpu')
+
+
+def _detect_lines(image: np.ndarray, direction: str = 'horizontal') -> np.ndarray:
+    """
+    Detect lines in specified direction with enhanced parameters
+    """
+    # Calculate minimum line length based on image size
+    if direction == 'horizontal':
+        min_length = image.shape[1] // 15
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (min_length, 1))
+    else:
+        min_length = image.shape[0] // 15
+        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, min_length))
+
+    # Apply morphological operations
+    eroded = cv2.erode(image, kernel, iterations=1)
+    dilated = cv2.dilate(eroded, kernel, iterations=1)
+
+    return dilated
+
 
 class OCREngine:
     def __init__(self):
         # Check CUDA availability
-        self.device = self._get_device()
+        self.device = _get_device()
         logging.info(f"OCR Engine initialized using device: {self.device}")
-        
+
         # Initialize EasyOCR with GPU settings
         gpu = self.device.type == 'cuda'
         if gpu:
@@ -22,7 +78,7 @@ class OCREngine:
             torch.backends.cudnn.deterministic = False
         else:
             logging.info("GPU not available. Using CPU for OCR processing.")
-        
+
         # Initialize EasyOCR with appropriate device settings
         self.reader = easyocr.Reader(
             ['en'],
@@ -34,45 +90,11 @@ class OCREngine:
             quantize=False,  # Disable quantization for better accuracy
             cudnn_benchmark=True
         )
-        
+
         self.min_confidence = 0.6
         self.dpi = 300  # Target DPI for image enhancement
 
-    def _get_device(self) -> torch.device:
-        """
-        Determine the best available device for computation
-        """
-        if torch.cuda.is_available():
-            # Get the GPU with the most free memory
-            device_id = 0
-            if torch.cuda.device_count() > 1:
-                free_memory = []
-                for i in range(torch.cuda.device_count()):
-                    torch.cuda.set_device(i)
-                    torch.cuda.empty_cache()
-                    free_memory.append(torch.cuda.memory_reserved(i))
-                device_id = free_memory.index(min(free_memory))
-            
-            device = torch.device(f'cuda:{device_id}')
-            
-            # Log GPU information
-            logging.info(f"Using GPU: {torch.cuda.get_device_name(device_id)}")
-            logging.info(f"GPU Memory: {torch.cuda.get_device_properties(device_id).total_memory / 1024**3:.2f} GB")
-            
-            # Optimize CUDA settings
-            torch.cuda.set_device(device_id)
-            torch.backends.cudnn.fastest = True
-            torch.backends.cudnn.benchmark = True
-            
-            return device
-        elif torch.backends.mps.is_available():
-            logging.info("Using Apple M1/M2 GPU acceleration")
-            return torch.device('mps')
-        else:
-            logging.info("No GPU available, using CPU")
-            return torch.device('cpu')
-
-    def _prepare_batch(self, image: np.ndarray) -> torch.Tensor:
+    def _prepare_batch(self, image: np.ndarray) -> Tensor | ndarray:
         """
         Prepare image batch for GPU processing
         """
@@ -99,22 +121,22 @@ class OCREngine:
         if image is None or image.size == 0:
             logging.warning("Received empty or None image")
             return "", 0.0
-            
+
         try:
             # Enhance image quality
             enhanced_image = self._enhance_image_quality(image)
-            
+
             # Ensure image is in RGB format
             if len(enhanced_image.shape) == 2:
                 enhanced_image = cv2.cvtColor(enhanced_image, cv2.COLOR_GRAY2RGB)
             elif enhanced_image.shape[2] == 4:
                 enhanced_image = cv2.cvtColor(enhanced_image, cv2.COLOR_BGRA2RGB)
-            
+
             # Verify image is valid
             if enhanced_image is None or enhanced_image.size == 0:
                 logging.error("Image enhancement failed")
                 return "", 0.0
-                
+
             # Perform OCR with paragraph detection
             try:
                 results = self.reader.readtext(
@@ -134,51 +156,51 @@ class OCREngine:
                     paragraph=False,
                     detail=1
                 )
-            
+
             if not results:
                 logging.warning("No text detected in image")
                 return "", 0.0
-            
+
             # Combine results with intelligent text grouping
             text_blocks = []
             confidences = []
-            
+
             current_line = []
             current_y = None
             y_threshold = 10  # Pixels threshold for same line detection
-            
+
             # Sort detections by position, with safe access to coordinates
             def get_sort_key(x):
                 try:
                     if len(x) >= 1 and x[0] and len(x[0]) >= 1:
-                        return (x[0][0][1], x[0][0][0])
+                        return x[0][0][1], x[0][0][0]
                 except (IndexError, TypeError):
-                    return (float('inf'), float('inf'))
-                return (float('inf'), float('inf'))
-            
+                    return float('inf'), float('inf')
+                return float('inf'), float('inf')
+
             sorted_results = sorted(results, key=get_sort_key)
-            
+
             for detection in sorted_results:
                 try:
                     if not detection or len(detection) < 2:
                         continue
-                        
+
                     bbox = detection[0]
                     if not bbox or len(bbox) < 1:
                         continue
-                        
+
                     text = detection[1]
                     if not isinstance(text, str):
                         continue
-                        
+
                     confidence = detection[2] if len(detection) >= 3 else 0.8
-                    
+
                     if confidence > self.min_confidence:
                         try:
                             y_coord = bbox[0][1]  # Top-left y coordinate
                         except (IndexError, TypeError):
                             continue
-                            
+
                         # Check if this text belongs to the current line
                         if current_y is None or abs(y_coord - current_y) <= y_threshold:
                             current_line.append(text)
@@ -189,25 +211,25 @@ class OCREngine:
                                 text_blocks.append(' '.join(current_line))
                             current_line = [text]
                             current_y = y_coord
-                        
+
                         confidences.append(confidence)
                 except (IndexError, TypeError, AttributeError) as e:
                     logging.debug(f"Skipping malformed detection: {str(e)}")
                     continue
-            
+
             # Add last line if exists
             if current_line:
                 text_blocks.append(' '.join(current_line))
-            
+
             # Return combined text and average confidence
             full_text = '\n'.join(text_blocks) if text_blocks else ""
             avg_confidence = np.mean(confidences) if confidences else 0.0
-            
+
             if not full_text.strip():
                 logging.warning("No valid text extracted after processing")
-                
+
             return full_text, avg_confidence
-            
+
         except Exception as e:
             logging.error(f"Error in extract_text: {str(e)}")
             return "", 0.0
@@ -219,16 +241,16 @@ class OCREngine:
         if image is None or image.size == 0:
             logging.warning("Received empty or None image")
             return []
-            
+
         try:
             # Enhance image
             enhanced_image = self._enhance_image_quality(image)
-            
+
             # Verify image is valid
             if enhanced_image is None or enhanced_image.size == 0:
                 logging.error("Image enhancement failed")
                 return []
-            
+
             # Perform OCR with layout analysis
             try:
                 results = self.reader.readtext(
@@ -248,27 +270,27 @@ class OCREngine:
                     paragraph=False,
                     detail=1
                 )
-            
+
             if not results:
                 logging.warning("No text detected in image")
                 return []
-            
+
             structured_results = []
             for detection in results:
                 try:
                     if not detection or len(detection) < 2:
                         continue
-                        
+
                     bbox = detection[0]
                     if not bbox or len(bbox) < 4:  # Need 4 points for bbox
                         continue
-                        
+
                     text = detection[1]
                     if not isinstance(text, str):
                         continue
-                        
+
                     confidence = detection[2] if len(detection) >= 3 else 0.8
-                    
+
                     if confidence > self.min_confidence:
                         try:
                             # Convert bbox points to x, y, width, height format
@@ -277,13 +299,13 @@ class OCREngine:
                             y = int(min(points[:, 1]))
                             w = int(max(points[:, 0]) - x)
                             h = int(max(points[:, 1]) - y)
-                            
+
                             # Calculate additional layout information
-                            center_x = x + w/2
-                            center_y = y + h/2
-                            aspect_ratio = w/h if h != 0 else 0
+                            center_x = x + w / 2
+                            center_y = y + h / 2
+                            aspect_ratio = w / h if h != 0 else 0
                             area = w * h
-                            
+
                             structured_results.append({
                                 'text': text,
                                 'confidence': confidence,
@@ -296,8 +318,8 @@ class OCREngine:
                                 'aspect_ratio': aspect_ratio,
                                 'area': area,
                                 'is_title': h > 30 or aspect_ratio > 3,
-                                'alignment': 'left' if x < enhanced_image.shape[1]/3 else 
-                                           'right' if x > 2*enhanced_image.shape[1]/3 else 'center'
+                                'alignment': 'left' if x < enhanced_image.shape[1] / 3 else
+                                'right' if x > 2 * enhanced_image.shape[1] / 3 else 'center'
                             })
                         except (IndexError, TypeError, AttributeError) as e:
                             logging.debug(f"Error processing detection bbox: {str(e)}")
@@ -305,19 +327,19 @@ class OCREngine:
                 except Exception as e:
                     logging.debug(f"Skipping malformed detection: {str(e)}")
                     continue
-            
+
             return structured_results
-            
+
         except Exception as e:
             logging.error(f"Error in extract_structured_text: {str(e)}")
             return []
 
-    def extract_table_cells(self, image: np.ndarray, table_region: Tuple[bool, np.ndarray, List[List[Any]]]) -> List[Dict[str, Any]]:
+    def extract_table_cells(self, table_region: Tuple[bool, np.ndarray, List[List[Any]]]) -> List[
+        Dict[str, Any]]:
         """
         Extract text from table cells with enhanced cell detection
         
         Args:
-            image: Input image
             table_region: Tuple of (found, region_image, cells) from table detection
             
         Returns:
@@ -327,23 +349,23 @@ class OCREngine:
         if not table_found or region_image is None:
             logging.warning("No valid table region provided")
             return []
-            
+
         cells = []
-        
+
         try:
             # Process each detected cell
             for row in detected_cells:
                 for cell in row:
                     # Extract cell ROI from the region image
-                    cell_roi = region_image[cell.y:cell.y+cell.height, cell.x:cell.x+cell.width]
-                    
+                    cell_roi = region_image[cell.y:cell.y + cell.height, cell.x:cell.x + cell.width]
+
                     # Skip invalid cells
                     if cell_roi is None or cell_roi.size == 0:
                         continue
-                    
+
                     # Enhance cell image
                     enhanced_roi = self._enhance_image_quality(cell_roi)
-                    
+
                     # Perform OCR on cell
                     try:
                         results = self.reader.readtext(
@@ -356,11 +378,11 @@ class OCREngine:
                     except Exception as e:
                         logging.debug(f"OCR failed for cell: {str(e)}")
                         continue
-                    
+
                     # Combine cell text
                     cell_text = ''
                     cell_confidence = 0.0
-                    
+
                     for detection in results:
                         try:
                             if len(detection) == 3:
@@ -370,13 +392,13 @@ class OCREngine:
                                 confidence = 0.8  # Default confidence for 2-element tuples
                             else:
                                 continue  # Skip invalid detections
-                                
+
                             if confidence > self.min_confidence:
                                 cell_text += ' ' + text
                                 cell_confidence = max(cell_confidence, confidence)
                         except (IndexError, TypeError):
                             continue  # Skip malformed detections
-                    
+
                     if cell_text.strip():
                         cells.append({
                             'text': cell_text.strip(),
@@ -387,9 +409,9 @@ class OCREngine:
                             'height': cell.height,
                             'area': cell.width * cell.height
                         })
-            
+
             return cells
-            
+
         except Exception as e:
             logging.error(f"Error processing table cells: {str(e)}")
             return []
@@ -404,56 +426,38 @@ class OCREngine:
                 gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
             else:
                 gray = image.copy()
-            
+
             # Calculate current DPI and resize if needed
             if self.dpi > 300:
                 scale_factor = self.dpi / 300
-                gray = cv2.resize(gray, None, fx=scale_factor, fy=scale_factor, 
-                                interpolation=cv2.INTER_CUBIC)
-            
+                gray = cv2.resize(gray, None, fx=scale_factor, fy=scale_factor,
+                                  interpolation=cv2.INTER_CUBIC)
+
             # Apply CLAHE for contrast enhancement
-            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8,8))
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
             contrast_enhanced = clahe.apply(gray)
-            
+
             # Denoise while preserving edges
             denoised = cv2.fastNlMeansDenoising(contrast_enhanced, None, 10, 7, 21)
-            
+
             # Apply bilateral filter for edge preservation
             bilateral = cv2.bilateralFilter(denoised, 9, 75, 75)
-            
+
             # Adaptive thresholding with optimized parameters
             binary = cv2.adaptiveThreshold(
                 bilateral, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
                 cv2.THRESH_BINARY, 11, 2
             )
-            
+
             # Remove small noise
-            kernel = np.ones((2,2), np.uint8)
+            kernel = np.ones((2, 2), np.uint8)
             cleaned = cv2.morphologyEx(binary, cv2.MORPH_OPEN, kernel)
-            
+
             # Fill small holes
-            kernel = np.ones((3,3), np.uint8)
+            kernel = np.ones((3, 3), np.uint8)
             cleaned = cv2.morphologyEx(cleaned, cv2.MORPH_CLOSE, kernel)
-            
+
             return cleaned
-        except Exception as e:
+        except Exception:
             # If any enhancement step fails, return original image
             return image if len(image.shape) == 2 else cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
-    def _detect_lines(self, image: np.ndarray, direction: str = 'horizontal') -> np.ndarray:
-        """
-        Detect lines in specified direction with enhanced parameters
-        """
-        # Calculate minimum line length based on image size
-        if direction == 'horizontal':
-            min_length = image.shape[1] // 15
-            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (min_length, 1))
-        else:
-            min_length = image.shape[0] // 15
-            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (1, min_length))
-        
-        # Apply morphological operations
-        eroded = cv2.erode(image, kernel, iterations=1)
-        dilated = cv2.dilate(eroded, kernel, iterations=1)
-        
-        return dilated 

@@ -1,6 +1,7 @@
-import cv2
 import numpy as np
+
 from .advanced_preprocessor import AdvancedPreprocessor
+
 
 class ImagePreprocessor:
     def __init__(self, debug_mode: bool = False):
@@ -14,7 +15,7 @@ class ImagePreprocessor:
         """
         # Apply advanced preprocessing
         processed_image = self.advanced_preprocessor.enhance_image(image)
-        
+
         return processed_image
 
     def detect_table_regions(self, image: np.ndarray) -> list:
@@ -34,4 +35,4 @@ class ImagePreprocessor:
         Enable/disable debug mode
         """
         self.debug_mode = enabled
-        self.advanced_preprocessor.set_debug_mode(enabled) 
+        self.advanced_preprocessor.set_debug_mode(enabled)

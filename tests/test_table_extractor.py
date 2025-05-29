@@ -1,31 +1,35 @@
 import unittest
-import numpy as np
+
 import cv2
-from src.extraction.table_extractor import TableExtractor, TableCell, TableValidation
+import numpy as np
+
+from src.extraction.table_extractor import TableExtractor, TableValidation, preprocess_image, detect_table_region, \
+    validate_table_data, _map_header_to_column, _is_numeric
+
 
 class TestTableExtractor(unittest.TestCase):
     def setUp(self):
         """Set up test fixtures"""
         self.extractor = TableExtractor()
-        
+
         # Create a simple test image with a table
         self.test_image = np.zeros((300, 400, 3), dtype=np.uint8)
         # Draw table lines
         cv2.line(self.test_image, (50, 50), (350, 50), (255, 255, 255), 2)  # Top
         cv2.line(self.test_image, (50, 100), (350, 100), (255, 255, 255), 2)  # Header
         cv2.line(self.test_image, (50, 150), (350, 150), (255, 255, 255), 2)  # Row
-        cv2.line(self.test_image, (50, 50), (50, 150), (255, 255, 255), 2)   # Left
-        cv2.line(self.test_image, (350, 50), (350, 150), (255, 255, 255), 2) # Right
+        cv2.line(self.test_image, (50, 50), (50, 150), (255, 255, 255), 2)  # Left
+        cv2.line(self.test_image, (350, 50), (350, 150), (255, 255, 255), 2)  # Right
 
     def test_preprocess_image(self):
         """Test image preprocessing"""
-        processed = self.extractor.preprocess_image(self.test_image)
+        processed = preprocess_image(self.test_image)
         self.assertIsInstance(processed, np.ndarray)
         self.assertEqual(len(processed.shape), 2)  # Should be grayscale
 
     def test_detect_table_region(self):
         """Test table region detection"""
-        found, region, cells = self.extractor.detect_table_region(self.test_image)
+        found, region, cells = detect_table_region(self.test_image)
         self.assertTrue(found)
         self.assertIsInstance(region, np.ndarray)
         self.assertIsInstance(cells, list)
@@ -46,7 +50,7 @@ class TestTableExtractor(unittest.TestCase):
                 'total_amount': 45.0
             }
         ]
-        validation = self.extractor.validate_table_data(test_data)
+        validation = validate_table_data(test_data)
         self.assertIsInstance(validation, TableValidation)
         self.assertTrue(validation.is_valid)
         self.assertEqual(len(validation.errors), 0)
@@ -61,7 +65,7 @@ class TestTableExtractor(unittest.TestCase):
                 'total_amount': 25.0  # Incorrect total
             }
         ]
-        validation = self.extractor.validate_table_data(test_data)
+        validation = validate_table_data(test_data)
         self.assertIsInstance(validation, TableValidation)
         self.assertFalse(validation.is_valid)
         self.assertGreater(len(validation.errors), 0)
@@ -78,7 +82,7 @@ class TestTableExtractor(unittest.TestCase):
             ('Invalid Header', None)
         ]
         for header, expected in test_cases:
-            result = self.extractor._map_header_to_column(header)
+            result = _map_header_to_column(header)
             self.assertEqual(result, expected)
 
     def test_is_numeric(self):
@@ -91,11 +95,11 @@ class TestTableExtractor(unittest.TestCase):
             ('12.34.56', False)
         ]
         for value, expected in test_cases:
-            result = self.extractor._is_numeric(value)
+            result = _is_numeric(value)
             self.assertEqual(result, expected)
 
     def test_process_multi_page_table(self):
-        """Test multi-page table processing"""
+        """Test multipage table processing"""
         # Create two test images
         images = [self.test_image.copy() for _ in range(2)]
         table_data = self.extractor.process_multi_page_table(images)
@@ -104,9 +108,10 @@ class TestTableExtractor(unittest.TestCase):
     def test_empty_table(self):
         """Test handling of empty table"""
         empty_image = np.zeros((100, 100, 3), dtype=np.uint8)
-        found, region, cells = self.extractor.detect_table_region(empty_image)
+        found, region, cells = detect_table_region(empty_image)
         self.assertFalse(found)
         self.assertEqual(len(cells), 0)
 
+
 if __name__ == '__main__':
-    unittest.main() 
+    unittest.main()
