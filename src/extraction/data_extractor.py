@@ -6,7 +6,8 @@ import cv2
 import numpy as np
 
 from .ocr_engine import OCREngine
-from .table_extractor import TableExtractor
+from .table_extractor import TableExtractor, detect_table_region, _extract_table_data_from_cells, validate_table_data
+from ..preprocessing.image_processor import ImagePreprocessor
 
 
 def extract_invoice_number(text):
@@ -143,8 +144,11 @@ def detect_seal_and_signature(image, output_dir=None, base_filename=None):
     """
     Detect and extract seal and signature from the image
     """
-    # Convert to grayscale
-    gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    # Convert to grayscale if image is color
+    if len(image.shape) == 3:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = image.copy()
 
     # Apply adaptive thresholding
     thresh = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
@@ -193,6 +197,7 @@ class DataExtractor:
         self.confidence_threshold = 0.6  # Minimum confidence score to accept
         self.table_extractor = TableExtractor(min_confidence=self.confidence_threshold)
         self.ocr_engine = OCREngine()
+        self.image_processor = ImagePreprocessor()
         self.validation_results = None  # Store validation results for reference
 
     def extract_text(self, image):
@@ -235,7 +240,7 @@ class DataExtractor:
 
     def process_multi_page_invoice(self, images, output_dir=None, base_filename=None):
         """
-        Process a multi-page invoice
+        Process a multipage invoice
         """
         all_data = {
             'invoice_number': {'value': None, 'confidence': 0.0},
@@ -305,7 +310,7 @@ class DataExtractor:
         Extract all required data from the invoice image
         """
         # Enhance image for better OCR
-        enhanced_image = self.ocr_engine.enhance_recognition(image)
+        enhanced_image = self.ocr_engine._enhance_image_quality(image)
 
         # Extract text
         text, text_confidence = self.extract_text(enhanced_image)
@@ -313,24 +318,40 @@ class DataExtractor:
         # Extract all fields
         invoice_number, inv_conf = extract_invoice_number(text)
         date, date_conf = extract_date(text)
-        gst_numbers = extract_gst_numbers(text)
+        gst_numbers = extract_gst_numbers(text) or []  # Ensure gst_numbers is a list
         po_number, po_conf = extract_po_number(text)
         shipping_address, addr_conf = extract_shipping_address(text)
         seal_present, seal_conf, extracted_regions = detect_seal_and_signature(
             image, output_dir, base_filename)
         table_data = self.extract_table_data(enhanced_image)
 
+        # Handle GST numbers safely
+        supplier_gst = {'value': None, 'confidence': 0.0}
+        bill_to_gst = {'value': None, 'confidence': 0.0}
+        
+        if gst_numbers:
+            supplier_gst = {
+                'value': gst_numbers[0][0],
+                'confidence': gst_numbers[0][1]
+            }
+            if len(gst_numbers) > 1:
+                bill_to_gst = {
+                    'value': gst_numbers[1][0],
+                    'confidence': gst_numbers[1][1]
+                }
+
         return {
             'invoice_number': {'value': invoice_number, 'confidence': inv_conf},
             'invoice_date': {'value': date, 'confidence': date_conf},
-            'supplier_gst_number': {'value': gst_numbers[0][0] if gst_numbers else None,
-                                    'confidence': gst_numbers[0][1] if gst_numbers else 0.0},
-            'bill_to_gst_number': {'value': gst_numbers[1][0] if len(gst_numbers) > 1 else None,
-                                   'confidence': gst_numbers[1][1] if len(gst_numbers) > 1 else 0.0},
+            'supplier_gst_number': supplier_gst,
+            'bill_to_gst_number': bill_to_gst,
             'po_number': {'value': po_number, 'confidence': po_conf},
             'shipping_address': {'value': shipping_address, 'confidence': addr_conf},
-            'seal_and_sign_present': {'value': seal_present, 'confidence': seal_conf,
-                                      'num_regions': len(extracted_regions)},
+            'seal_and_sign_present': {
+                'value': seal_present,
+                'confidence': seal_conf,
+                'num_regions': len(extracted_regions)
+            },
             'table_data': table_data,
             'no_items': len(table_data),
             'validation_results': self.validation_results._asdict() if self.validation_results else None

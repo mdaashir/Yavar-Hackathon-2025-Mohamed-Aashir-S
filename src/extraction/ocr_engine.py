@@ -1,4 +1,5 @@
 import logging
+from pathlib import Path
 from typing import List, Dict, Any, Tuple
 
 import cv2
@@ -69,6 +70,11 @@ class OCREngine:
         self.device = _get_device()
         logging.info(f"OCR Engine initialized using device: {self.device}")
 
+        # Create models directory inside src if it doesn't exist
+        src_dir = Path(__file__).parent.parent
+        models_dir = src_dir / 'models'
+        models_dir.mkdir(exist_ok=True)
+
         # Initialize EasyOCR with GPU settings
         gpu = self.device.type == 'cuda'
         if gpu:
@@ -83,7 +89,7 @@ class OCREngine:
         self.reader = easyocr.Reader(
             ['en'],
             gpu=gpu,
-            model_storage_directory='models',
+            model_storage_directory=str(models_dir),
             download_enabled=True,
             detector=True,
             recognizer=True,

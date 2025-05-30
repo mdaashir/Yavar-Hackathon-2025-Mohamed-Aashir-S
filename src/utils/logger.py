@@ -1,6 +1,6 @@
 import logging
-import os
 from datetime import datetime
+from pathlib import Path
 from typing import Optional
 
 
@@ -18,16 +18,17 @@ class Logger:
         self.logger = logging.getLogger('InvoiceProcessor')
         self.logger.setLevel(logging.INFO)
 
-        # Create logs directory if it doesn't exist
-        log_dir = 'logs'
-        os.makedirs(log_dir, exist_ok=True)
+        # Create logs directory inside src if it doesn't exist
+        src_dir = Path(__file__).parent.parent
+        log_dir = src_dir / 'logs'
+        log_dir.mkdir(exist_ok=True)
 
         # Create log file with timestamp
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
-        log_file = os.path.join(log_dir, f'invoice_processing_{timestamp}.log')
+        log_file = log_dir / f'invoice_processing_{timestamp}.log'
 
         # File handler with detailed formatting
-        file_handler = logging.FileHandler(log_file)
+        file_handler = logging.FileHandler(str(log_file))
         file_handler.setLevel(logging.DEBUG)
         file_formatter = logging.Formatter(
             '%(asctime)s - %(name)s - %(levelname)s - %(filename)s:%(lineno)d - %(message)s'

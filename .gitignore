@@ -174,3 +174,4 @@ cython_debug/
 .pypirc
 src/models/
 src/output/
+src/input/
